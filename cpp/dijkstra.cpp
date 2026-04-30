@@ -1,62 +1,124 @@
+// dijkstra.cpp
 #include "dijkstra.h"
-#include "cost_model.h"
-#include <queue>
-#include <limits>
-#include <unordered_map>
-#include <algorithm>
 
+#include <queue>
+#include <unordered_map>
+#include <iostream>
+#include <fstream>
+#include <chrono>
+#include <algorithm>
 using namespace std;
 
-DijkstraResult dijkstra(Graph& g, long long start, long long end, double slopeWeight) {
+using PQItem = std::pair<double, long long>;
+
+DijkstraResult Dijkstra::run(long long source, long long destination) const
+{
+    DijkstraResult res;
+
+    if (!graph_.hasNode(source)) {
+        cerr << "[Dijkstra] Source node " << source << " not in graph.\n";
+        return res;
+    }
+    if (!graph_.hasNode(destination)) {
+        cerr << "[Dijkstra] Destination node " << destination << " not in graph.\n";
+        return res;
+    }
 
     unordered_map<long long, double> dist;
-    unordered_map<long long, long long> parent;
+    unordered_map<long long, long long> prev;  
 
-    for (auto& p : g.nodes)
-        dist[p.first] = 1e18;
+    dist[source] = 0.0;
 
-    dist[start] = 0;
+    priority_queue<PQItem, vector<PQItem>, greater<PQItem>> pq;
+    pq.push({0.0, source});
 
-    priority_queue<
-        pair<double, long long>,
-        vector<pair<double, long long>>,
-        greater<pair<double, long long>>
-    > pq;
+    auto t0 = chrono::steady_clock::now();
 
-    pq.push({0, start});
-
-    long long explored = 0;
+    size_t relaxations = 0;
 
     while (!pq.empty()) {
-        auto [d, u] = pq.top();
+        double d   = pq.top().first;
+        long long u = pq.top().second;
         pq.pop();
 
-        if (d > dist[u]) continue;
+        if (d > dist[u]) continue;   
 
-        explored++;
+        if (u == destination) break; 
+        for (const Edge& e : graph_.getNeighbours(u)) {
+            double edge_cost = model_.compute(e);
+            double new_dist  = dist[u] + edge_cost;
 
-        if (u == end) break;
-
-        for (auto& e : g.nodes[u].neighbors) {
-            double cost = computeCost(e, slopeWeight);
-
-            if (dist[e.dest] > dist[u] + cost) {
-                dist[e.dest] = dist[u] + cost;
-                parent[e.dest] = u;
-                pq.push({dist[e.dest], e.dest});
+            auto it = dist.find(e.to);
+            if (it == dist.end() || new_dist < it->second) {
+                dist[e.to] = new_dist;
+                prev[e.to] = u;
+                pq.push({new_dist, e.to});
+                ++relaxations;
             }
         }
     }
 
-    vector<long long> path;
+    auto t1 = chrono::steady_clock::now();
+    double elapsed_ms = chrono::duration<double, milli>(t1 - t0).count();
 
-    if (dist[end] != 1e18) {
-        for (long long cur = end; cur != start; cur = parent[cur])
-            path.push_back(cur);
-
-        path.push_back(start);
-        reverse(path.begin(), path.end());
+    // Check reachability
+    if (dist.find(destination) == dist.end()) {
+        cerr << "[Dijkstra] Destination " << destination << " is unreachable from " << source << ".\n";
+        return res;
     }
 
-    return {path, dist[end], explored};
+    vector<long long> path;
+    for (long long cur = destination; cur != source; ) {
+        path.push_back(cur);
+        auto it = prev.find(cur);
+        if (it == prev.end()) {
+            cerr << "[Dijkstra] Path reconstruction failed at node " << cur << ".\n";
+            return res;
+        }
+        cur = it->second;
+    }
+    path.push_back(source);
+    reverse(path.begin(), path.end());
+
+    double total_dist = 0.0, total_time = 0.0;
+    TimeCost tc;
+    for (size_t i = 0; i + 1 < path.size(); ++i) {
+        long long u = path[i], v = path[i + 1];
+        for (const Edge& e : graph_.getNeighbours(u)) {
+            if (e.to == v) {
+                total_dist += e.distance_m;
+                total_time += tc.compute(e);
+                break;
+            }
+        }
+    }
+
+    res.found          = true;
+    res.total_cost     = dist[destination];
+    res.total_distance = total_dist;
+    res.total_time_s   = total_time;
+    res.path           = std::move(path);
+
+    cout << "[Dijkstra] Path found in " << elapsed_ms << " ms"
+              << " | relaxations=" << relaxations
+              << " | nodes visited=" << dist.size() << "\n";
+
+    return res;
+}
+
+
+void Dijkstra::writePathFile(const DijkstraResult& result,
+                             const std::string& out_path)
+{
+    ofstream f(out_path);
+    if (!f.is_open()) {
+        cerr << "[Dijkstra] Cannot write " << out_path << "\n";
+        return;
+    }
+    for (long long nid : result.path) {
+        f << nid << "\n";
+    }
+    f << "TOTAL_DISTANCE: " << result.total_distance << "\n";
+    f << "TOTAL_TIME: "     << result.total_time_s   << "\n";
+    cout << "[Dijkstra] Path written to " << out_path << "\n";
 }
