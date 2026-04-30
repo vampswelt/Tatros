@@ -1,31 +1,49 @@
-#ifndef GRAPH_H
-#define GRAPH_H
+#pragma once
+v.
 
+#include <string>
 #include <vector>
 #include <unordered_map>
 using namespace std;
 
-struct Edge {
-    long long dest;
-    double dist;
-    double slope;
-};
-
 struct Node {
     long long id;
-    double lat, lon, elev;
-    vector<Edge> neighbors;
+    double    lat;
+    double    lon;
 };
+
+
+struct Edge {
+    long long to;          
+    double    distance_m;  
+    double    cost;        
+    string road_type;
+    int       max_speed_kmh;
+    bool      oneway;
+};
+
 
 class Graph {
 public:
-    unordered_map<long long, Node> nodes;
+   
+    bool loadFromCSV(const std::string& nodes_csv,
+                     const std::string& edges_csv);
 
-    void addNode(long long id, double lat, double lon, double elev);
-    void addEdge(long long s, long long d, double dist, double slope);
+    
+    const Node*              getNode(long long id) const;
+    const std::vector<Edge>& getNeighbours(long long id) const;
+    const std::vector<long long>& getAllNodeIds() const;
 
-    void loadNodes(const string& file);
-    void loadEdges(const string& file);
+    size_t nodeCount() const { return nodes_.size(); }
+    size_t edgeCount() const { return edge_count_;   }
+
+    bool hasNode(long long id) const;
+
+private:
+    unordered_map<long long, Node>              nodes_;
+    unordered_map<long long, vector<Edge>> adj_;
+    vector<long long>                           node_ids_;   
+    size_t edge_count_ = 0;
+
+    static const vector<Edge> EMPTY_EDGES;
 };
-
-#endif
